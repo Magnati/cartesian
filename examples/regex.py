@@ -1,10 +1,14 @@
 import json
+import logging
 import operator
 import pathlib
 import re
 
 from cartesian.algorithm import oneplus
 from cartesian.cgp import *
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__file__)
 
 
 def group(s):
@@ -30,13 +34,15 @@ primitives = [
     Primitive("or", or_, 2),
     # Primitive("begin", lambda s: f"^{s.replace('^','')}", 1),
     # Primitive("end", lambda s: f"{s.replace('$', '')}$", 1),
-    Symbol("a"),
-    Symbol("b"),
-    Symbol("."),
-]
+    Symbol(","),
+] + list(Symbol(f"{i}") for i in range(10))
+
 pset = PrimitiveSet.create(primitives)
 
-MyCartesian = Cartesian("MyCartesian", pset, n_rows=1, n_columns=10, n_out=1, n_back=1)
+
+# TODO: #columns must be the longest match
+
+MyCartesian = Cartesian("MyCartesian", pset, n_rows=10, n_columns=32, n_out=1, n_back=4)
 
 
 def compile_regex(program):
@@ -53,7 +59,7 @@ def compile_regex(program):
     return re.compile(stack[-1])
 
 
-data = ["a", "aa", "aba", "aaaa", "aaaaa", "aca"]
+data = ["0", "00,", "001,", "002,", "001,001,", "002,001,", "001,00"]
 
 
 def evaluate(program):
@@ -62,5 +68,96 @@ def evaluate(program):
 
 
 res = oneplus(evaluate, cls=MyCartesian, maxiter=10, n_jobs=1)
+print(res)
+print(compile_regex(res.ind))
+
+
+class RegexFuncWrapper:
+
+    examples = []
+
+    @classmethod
+    def init_examples(cls):
+        json_dir = pathlib.Path(__file__).parent / "small_data.json"
+        with open(json_dir) as json_file:
+            cls.examples = json.load(json_file)["examples"]
+
+    @staticmethod
+    def exact_matches(regex):
+        for e in RegexFuncWrapper.examples:
+            pass
+
+    @staticmethod
+    def evaluate(individual):
+        # print("evaluate-test: len=", len(RegexFuncWrapper.examples))
+        regex = compile_regex(individual)
+        # print("regex='{}'".format(str(regex)))
+
+        # Confusion Matrix (without 'true negative')
+        positive = 0
+        negative = 0
+        true_positive = 0
+        # true_negative = 0
+        false_negative = 0
+        false_positive = 0
+
+        all_wanted = 0
+
+        for e in RegexFuncWrapper.examples:
+            example_string = e["string"]
+            wanted = e["match"]
+            all_wanted += len(wanted)
+
+            last_wanted = 0
+            for matched in regex.finditer(example_string):
+                positive += 1
+                for w in wanted[last_wanted:]:
+                    if w["start"] == matched.start() and w["end"] == matched.end():
+                        true_positive += 1
+                        last_wanted = wanted.index(w)
+                        break
+                    else:
+                        if matched.end() > w["end"]:
+                            negative += 1
+                            false_negative += 1
+                            last_wanted += 1
+                            continue
+                else:
+                    false_positive += 1
+
+            negative += len(wanted[last_wanted:])
+            false_negative += len(wanted[last_wanted:])
+
+        try:
+            assert all_wanted == true_positive + false_negative
+            assert positive == true_positive + false_positive
+        except AssertionError as e:
+            logger.exception(e)
+
+        # Edge case
+        if true_positive == 0 and (false_positive > 0 or false_negative > 0):
+            precision, recall, f_score = 0, 0, 0
+        else:
+            # Precision (PPV):
+            precision = true_positive / (true_positive + false_positive)
+            # Recall (TPR):
+            recall = true_positive / (true_positive + false_negative)
+
+            # F-Measure:
+            f_score = 2 * (precision * recall) / (precision + recall)
+
+        # TODO: partial matches
+
+        # length (needed?)
+        length = len(regex.pattern)
+
+        # TODO: weighting
+
+        return 1 / (1 + f_score)
+
+
+RegexFuncWrapper.init_examples()
+
+res = oneplus(RegexFuncWrapper.evaluate, cls=MyCartesian, mutation_method="active", maxiter=10000, n_jobs=1)
 print(res)
 print(compile_regex(res.ind))
