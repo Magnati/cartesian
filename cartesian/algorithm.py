@@ -48,7 +48,7 @@ def oneplus(
     """1 + lambda algorithm.
 
     In each generation, create lambda offspring and compare their fitness to the parent individual.
-    The fittest individual carries over to the next generation. In case of a draw, the offspring is prefered.
+    The fittest individual carries over to the next generation. In case of a draw, the offspring is preferred.
 
     Args:
         fun: callable(individual), function to be optimized
